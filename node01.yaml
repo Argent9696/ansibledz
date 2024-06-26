@@ -1,0 +1,117 @@
+---
+- name: ETCD solo
+  hosts: all
+  become: true
+  tasks:
+    - name: Устанавливаем ETCD
+      apt:
+        name: etcd
+        state: present
+
+    - name: Заменяем дефолтный конфиг на наш стильный, модный и честный
+      template:
+        src: "{{ playbook_dir  }}/etcd.j2"
+        dest: /etc/default/etcd
+
+    - name: Перезапустим etcd
+      service:
+        name: etcd
+        state: restarted
+
+    - name: Установка postgresql
+      apt:
+        name: postgresql
+        state: present
+
+    - name: Остановим postgresql
+      service:
+        name: postgresql
+        state: stopped
+
+    - name: Выключаем службу навсегда
+      service:
+        name: postgresql
+        enabled: false
+
+    - name: Установка пакетов для patroni
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - python3-pip
+        - python3-dev
+        - libpq-dev
+      become: true
+
+    - name: Обновим пакеты до последней версии
+      pip:
+        name: pip
+        state: latest
+        executable: pip3
+
+    - name: Установим Patroni & зависимости
+      pip:
+        name: "{{ item }}"
+      loop:
+        - patroni
+        - python-etcd
+        - psycopg2
+
+    - name: Готовим место для создания символической ссылки
+      file:
+        path: /usr/sbin/*
+        state: absent
+
+    - name: Создаем символическую ссылку для PostgreSQL
+      command: ln -s /usr/lib/postgresql/14/bin/* /usr/sbin/
+
+    - name: Создаем директорию /mnt/patroni
+      file:
+        path: /mnt/patroni
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0700'
+
+    - name: Копируем конфигурационный файл Patroni
+      template:
+        src: "{{ playbook_dir }}/patroni.j2"
+        dest: /etc/patroni.yml
+
+    - name: Копируем конфигурационный файл сервиса Patroni
+      copy:
+        src: "{{ playbook_dir }}/patroni.service"
+        dest: /etc/systemd/system/patroni.service
+      notify: reload systemd
+
+    - name: Перезапустим Patroni
+      service:
+       name: patroni
+       state: restarted
+
+    - name: Включаем
+      service:
+       name: patroni
+       enabled: true
+
+    - name: Установка Haproxy
+      apt:
+        name: haproxy
+        state: present
+
+    - name: Готовим место для нашего конфига
+      copy:
+        src: /etc/haproxy/haproxy.cfg
+        dest: /etc/haproxy.cfg-orig
+        mode: preserve
+
+    - name: Заменяем конфиг на наш
+      template:
+        src: "{{ playbook_dir }}/haproxy.j2"
+        dest: /etc/haproxy/haproxy.cfg
+
+    - name: Перезапуск haproxy
+      service:
+        name: haproxy
+        state: restarted
+
